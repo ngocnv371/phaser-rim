@@ -312,8 +312,8 @@ export default class MainScene extends Phaser.Scene {
 
         const res = this.resources.get(key);
 
-        if (mode === ACTIONS.CHOP && res?.type === ResourceType.TREE) {
-            this.createTask(x, y, TaskType.CHOP, 100, 0xff0000);
+        if (mode === ACTIONS.CHOP && (res?.type === ResourceType.TREE || res?.type === ResourceType.GRASS)) {
+            this.createTask(x, y, TaskType.CHOP, res.type === ResourceType.GRASS ? 30 : 100, 0xff0000);
         } else if (mode === ACTIONS.HARVEST && (res?.type === ResourceType.BERRY_BUSH || res?.type === ResourceType.POTATO_PLANT)) {
             this.createTask(x, y, TaskType.HARVEST, 50, 0x00ff00);
         } else if (mode === ACTIONS.MINE) {
@@ -339,7 +339,39 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private createBlueprint(x: number, y: number, type: string) {
-        if (!this.isLocationValid(x, y)) return;
+        if (!this.isLocationValid(x, y, true)) return;
+        
+        const key = `${x},${y}`;
+
+        // If building a floor on a floor, skip
+        if (type === 'floor' && this.structures.has(key) && this.structures.get(key)!.type === 'floor') return;
+        
+        // Check for resources and auto-queue clearing
+        if (this.resources.has(key)) {
+            const res = this.resources.get(key)!;
+            let taskType: TaskType | null = null;
+            let work = 50;
+            let color = 0xff0000;
+
+            if (res.type === ResourceType.TREE) { 
+                taskType = TaskType.CHOP; work = 100; color = 0xff0000; 
+            } else if (res.type === ResourceType.ROCK_CHUNK || res.type === ResourceType.IRON_ORE || res.type === ResourceType.GOLD_ORE) { 
+                taskType = TaskType.MINE; work = 120; color = 0x555555; 
+            } else if (res.type === ResourceType.BERRY_BUSH || res.type === ResourceType.POTATO_PLANT) { 
+                taskType = TaskType.HARVEST; work = 50; color = 0x00ff00; 
+            } else if (res.type === ResourceType.GRASS) { 
+                taskType = TaskType.CHOP; work = 20; color = 0x8bc34a; 
+            }
+
+            if (taskType) {
+                // Avoid duplicate task
+                const hasTask = this.globalTasks.some(t => t.targetPos.x === x && t.targetPos.y === y && t.type === taskType);
+                if (!hasTask) {
+                    this.createTask(x, y, taskType, work, color);
+                }
+            }
+        }
+
         const bp = Object.values(BLUEPRINTS).find(b => b.type === type);
         if (bp) {
             this.createTask(x, y, TaskType.BUILD, bp.workToBuild, bp.color, type);
@@ -351,14 +383,13 @@ export default class MainScene extends Phaser.Scene {
         if (!preset) return;
 
         // Simple validation: check if all spots are mostly valid
-        // Allow overlap for now, but usually we'd check strict validity
         
         preset.items.forEach(item => {
             const absX = x + item.x;
             const absY = y + item.y;
             // Check boundaries
             if (absX >= 0 && absX < MAP_WIDTH && absY >= 0 && absY < MAP_HEIGHT) {
-                if (this.isLocationValid(absX, absY)) {
+                if (this.isLocationValid(absX, absY, true)) {
                      this.createBlueprint(absX, absY, item.blueprintId);
                 }
             }
@@ -479,9 +510,28 @@ export default class MainScene extends Phaser.Scene {
                             }
                         } else {
                             // Standard Structure
-                            const icon = this.add.text(task.targetPos.x * TILE_SIZE + TILE_SIZE/2, task.targetPos.y * TILE_SIZE + TILE_SIZE/2, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
-                            this.structureSprites.set(key, this.add.container(0,0, [icon]));
-                            this.objectLayer.add(icon);
+                            const isBlock = task.structureId === 'wall' || task.structureId === 'floor';
+                            let container: Phaser.GameObjects.Container;
+
+                            if (isBlock) {
+                                // For walls and floors, use a solid rectangle to look connected
+                                const rect = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, bp.color);
+                                container = this.add.container(
+                                    task.targetPos.x * TILE_SIZE + TILE_SIZE/2, 
+                                    task.targetPos.y * TILE_SIZE + TILE_SIZE/2, 
+                                    [rect]
+                                );
+                            } else {
+                                // For furniture, keep the icon
+                                const icon = this.add.text(0, 0, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
+                                container = this.add.container(
+                                    task.targetPos.x * TILE_SIZE + TILE_SIZE/2, 
+                                    task.targetPos.y * TILE_SIZE + TILE_SIZE/2, 
+                                    [icon]
+                                );
+                            }
+                            
+                            this.structureSprites.set(key, container);
                             
                             this.structures.set(key, {
                                 id: key, type: task.structureId, x: task.targetPos.x, y: task.targetPos.y, health: 100, inventory: []
@@ -489,6 +539,13 @@ export default class MainScene extends Phaser.Scene {
                             
                             if(task.structureId === 'container') {
                                 this.structures.get(key)!.inventory.push({ type: ItemType.FOOD, amount: 50 });
+                            }
+
+                            // Layer management
+                            if (task.structureId === 'floor') {
+                                this.mapLayer.add(container);
+                            } else {
+                                this.objectLayer.add(container);
                             }
                         }
                     }
@@ -499,7 +556,9 @@ export default class MainScene extends Phaser.Scene {
             case TaskType.CHOP:
                 const res = this.resources.get(key);
                 if (res) {
-                    if (res.growth < 80) {
+                    if (res.type === ResourceType.GRASS) {
+                        // Grass just disappears
+                    } else if (res.growth < 80) {
                         // Yield nothing if immature
                     } else {
                         let itemType = (res.type === ResourceType.BERRY_BUSH || res.type === ResourceType.POTATO_PLANT) ? ItemType.FOOD : ItemType.WOOD;
@@ -594,7 +653,7 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    private isLocationValid(x: number, y: number): boolean {
+    private isLocationValid(x: number, y: number, allowResources: boolean = false): boolean {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
         
         // Impassable terrain
@@ -602,21 +661,19 @@ export default class MainScene extends Phaser.Scene {
         if (tile === TileType.DEEP_WATER || tile === TileType.LAVA) return false;
 
         const key = `${x},${y}`;
-        // Prevent building on top of existing things unless it's just a floor
-        if (this.structures.has(key) || this.blueprints.has(key) || this.resources.has(key)) {
-             // If structure is passable (floor), then valid
-             if (this.structures.has(key)) {
-                 const s = this.structures.get(key)!;
-                 // Allow building on floors
-                 if (s.type === 'floor') return true;
-                 return false;
-             }
-             return false; 
+        
+        // Check blueprints
+        if (this.blueprints.has(key)) return false; 
+        
+        // Check structures
+        if (this.structures.has(key)) {
+             const s = this.structures.get(key)!;
+             if (s.type !== 'floor') return false; // Occupied by non-floor
         }
         
-        // Rock logic
-        if (this.tiles[y][x] === TileType.ROCK) return true; // Can walk on rock floor
-        
+        // Check resources
+        if (this.resources.has(key) && !allowResources) return false;
+
         return true;
     }
 
@@ -674,7 +731,7 @@ export default class MainScene extends Phaser.Scene {
              this.ghostBuilding.setVisible(true);
              this.ghostBuilding.setPosition(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
              
-             const valid = this.isLocationValid(x, y);
+             const valid = this.isLocationValid(x, y, true);
              const rect = this.ghostBuilding.getAt(0) as Phaser.GameObjects.Rectangle;
              if (rect) rect.setFillStyle(valid ? 0x00ff00 : 0xff0000, 0.5);
 
@@ -697,10 +754,6 @@ export default class MainScene extends Phaser.Scene {
 
             this.ghostBuilding.setVisible(true);
             this.ghostBuilding.setPosition(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
-            // We center the ghost container on the mouse, but the items are relative 0,0.
-            // Adjust so mouse is top-left of preset? Or center?
-            // Currently 0,0 of container is at mouse. items are at x,y relative to 0,0.
-            // That works fine.
         } else {
              this.ghostBuilding.setVisible(false);
         }
