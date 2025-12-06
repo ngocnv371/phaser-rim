@@ -1,15 +1,21 @@
 
+
 import { ItemType, StructureBlueprint } from "./types";
 
 export const TILE_SIZE = 32;
 export const MAP_WIDTH = 64;
 export const MAP_HEIGHT = 64;
+export const MAX_SKILL_LEVEL = 20;
 
 export const COLORS = {
     GRASS: 0x2e7d32,
     DIRT: 0x5d4037,
     ROCK_FLOOR: 0x424242,
     WATER: 0x1976d2,
+    SHALLOW_WATER: 0x4fc3f7,
+    DEEP_WATER: 0x01579b,
+    MARSH: 0x33691e,
+    LAVA: 0xd32f2f,
     PAWN: 0xffeb3b,
     SELECTION: 0x2196f3,
 };
@@ -20,6 +26,7 @@ export const RESOURCE_ICONS = {
     ROCK_CHUNK: '🪨',
     IRON_ORE: '🏔️',
     GOLD_ORE: '🧈',
+    GRASS: '🌿',
 };
 
 export const ITEM_ICONS = {

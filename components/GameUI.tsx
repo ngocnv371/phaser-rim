@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { BLUEPRINTS, ACTIONS, ITEM_ICONS } from '../constants';
-import { PawnData, EVENTS, ResourceEntity, StructureEntity, ItemType } from '../types';
+import { PawnData, EVENTS, ResourceEntity, StructureEntity, ItemType, ResourceType } from '../types';
 import Phaser from 'phaser';
 
 interface GameUIProps {
@@ -109,7 +109,16 @@ const GameUI: React.FC<GameUIProps> = ({ game }) => {
                             Tile [{hoverData.x}, {hoverData.y}]
                         </div>
                         <div>Terrain: {hoverData.tileType}</div>
-                        {hoverData.res && <div className="text-green-400">{hoverData.res.type} ({hoverData.res.amount})</div>}
+                        {hoverData.res && (
+                            <div className="text-green-400">
+                                {hoverData.res.type} 
+                                {(hoverData.res.type === ResourceType.TREE || hoverData.res.type === ResourceType.BERRY_BUSH) && (
+                                    <span className={hoverData.res.growth >= 80 ? 'text-green-300 ml-1' : 'text-gray-400 ml-1'}>
+                                        ({hoverData.res.growth}%)
+                                    </span>
+                                )}
+                            </div>
+                        )}
                         {hoverData.struct && <div className="text-blue-400">Structure: {hoverData.struct.type}</div>}
                         {hoverData.struct?.inventory && hoverData.struct.inventory.length > 0 && (
                             <div className="text-xs text-gray-400">Contains: {hoverData.struct.inventory.map(i => `${i.amount} ${i.type}`).join(', ')}</div>
@@ -202,6 +211,7 @@ const GameUI: React.FC<GameUIProps> = ({ game }) => {
                     
                     <div className="mt-auto p-2 text-xs text-gray-500 border-t border-gray-700">
                         <p>WASD to Pan</p>
+                        <p>Scroll to Zoom</p>
                         <p>Right Click to Cancel Selection</p>
                     </div>
                 </div>

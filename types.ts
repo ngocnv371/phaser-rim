@@ -1,4 +1,5 @@
 
+
 export enum SkillType {
     CONSTRUCTION = 'Construction',
     MINING = 'Mining',
@@ -83,12 +84,14 @@ export enum ResourceType {
     BERRY_BUSH = 'Berry Bush',
     ROCK_CHUNK = 'Rock Chunk',
     IRON_ORE = 'Iron Ore',
-    GOLD_ORE = 'Gold Ore'
+    GOLD_ORE = 'Gold Ore',
+    GRASS = 'Grass'
 }
 
 export interface ResourceEntity {
     type: ResourceType;
-    amount: number; // How much it yields
+    amount: number; // Base yield
+    growth: number; // 0 to 100
 }
 
 export interface StructureEntity {

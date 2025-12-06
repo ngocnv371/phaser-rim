@@ -1,8 +1,19 @@
 
+
 import Phaser from 'phaser';
-import { TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, COLORS, BLUEPRINTS, RESOURCE_ICONS, ACTIONS, NEEDS_DECAY_RATE } from '../constants';
+import { TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, COLORS, BLUEPRINTS, RESOURCE_ICONS, ACTIONS, NEEDS_DECAY_RATE, MAX_SKILL_LEVEL } from '../constants';
 import { PawnData, SkillType, NeedType, Task, TaskType, Position, EVENTS, ResourceType, ResourceEntity, StructureEntity, ItemType, Item } from '../types';
 import { findPath } from './utils/pathfinding';
+
+enum TileType {
+    GRASS = 0,
+    DIRT = 1,
+    ROCK = 2,
+    SHALLOW_WATER = 3,
+    DEEP_WATER = 4,
+    MARSH = 5,
+    LAVA = 6
+}
 
 export default class MainScene extends Phaser.Scene {
     add!: Phaser.GameObjects.GameObjectFactory;
@@ -18,7 +29,7 @@ export default class MainScene extends Phaser.Scene {
     private overlayLayer!: Phaser.GameObjects.Container;
     
     // Game State
-    private tiles: number[][] = []; // 0: grass, 1: dirt, 2: rock
+    private tiles: number[][] = []; 
     private resources: Map<string, ResourceEntity> = new Map();
     private structures: Map<string, StructureEntity> = new Map();
     private blueprints: Map<string, Task> = new Map();
@@ -56,6 +67,10 @@ export default class MainScene extends Phaser.Scene {
 
         this.time.addEvent({ delay: 200, callback: () => this.emitUIUpdate(), loop: true });
         this.time.addEvent({ delay: 50, callback: () => this.checkMouseHover(), loop: true });
+        // Plant Growth Timer (Every 1 second)
+        this.time.addEvent({ delay: 1000, callback: () => this.growPlants(), loop: true });
+        // Wild Plant Spawning (Every 3 seconds)
+        this.time.addEvent({ delay: 3000, callback: () => this.trySpawnWildPlant(), loop: true });
     }
 
     update(time: number, delta: number) {
@@ -70,33 +85,89 @@ export default class MainScene extends Phaser.Scene {
         const graphics = this.add.graphics();
         this.mapLayer.add(graphics);
 
+        // 1. Initialize all as Grass
         for (let y = 0; y < MAP_HEIGHT; y++) {
             this.tiles[y] = [];
             for (let x = 0; x < MAP_WIDTH; x++) {
-                // Simple noise-like generation
-                const noise = Math.sin(x * 0.1) * Math.cos(y * 0.1);
-                const isRock = Math.random() < 0.05 + (noise > 0.5 ? 0.1 : 0);
-                const isDirt = Math.random() < 0.1;
-                
-                let color = COLORS.GRASS;
-                let type = 0;
+                this.tiles[y][x] = TileType.GRASS;
+            }
+        }
 
-                if (isRock) {
-                    color = COLORS.ROCK_FLOOR;
-                    type = 2;
-                } else if (isDirt) {
-                    color = COLORS.DIRT;
-                    type = 1;
+        // 2. Blobs Generation Helpers
+        const createBlob = (count: number, minSize: number, maxSize: number, type: TileType, resourceType?: ResourceType) => {
+            for (let i = 0; i < count; i++) {
+                const cx = Phaser.Math.Between(5, MAP_WIDTH - 5);
+                const cy = Phaser.Math.Between(5, MAP_HEIGHT - 5);
+                const w = Phaser.Math.Between(minSize, maxSize);
+                const h = Phaser.Math.Between(minSize, maxSize);
+
+                for (let y = cy - h; y <= cy + h; y++) {
+                    for (let x = cx - w; x <= cx + w; x++) {
+                        if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
+                            // Circular-ish check
+                            if (Phaser.Math.Distance.Between(cx, cy, x, y) < (w + h) / 2) {
+                                this.tiles[y][x] = type;
+                                if (resourceType) {
+                                    // Remove existing resource on this tile
+                                    const key = `${x},${y}`;
+                                    if(this.resources.has(key)) {
+                                         this.resources.delete(key);
+                                         if(this.resourceText.has(key)) {
+                                             this.resourceText.get(key)!.destroy();
+                                             this.resourceText.delete(key);
+                                         }
+                                    }
+                                    // High chance to spawn the resource for this biome
+                                    if (Math.random() < 0.7) this.spawnSpecificResource(x, y, resourceType);
+                                }
+                            }
+                        }
+                    }
                 }
-                
-                this.tiles[y][x] = type;
+            }
+        };
 
-                // Draw Tile
+        // 3. Generate Features
+        // Deep Water Cores
+        createBlob(8, 2, 5, TileType.DEEP_WATER);
+        // Shallow Water / Puddles (Surrounding deep or standalone)
+        createBlob(15, 2, 4, TileType.SHALLOW_WATER);
+        // Marsh
+        createBlob(10, 2, 4, TileType.MARSH);
+        // Lava
+        createBlob(2, 2, 3, TileType.LAVA);
+        
+        // Rock / Mountains with Ores
+        createBlob(6, 3, 6, TileType.ROCK, ResourceType.ROCK_CHUNK);
+        createBlob(3, 2, 3, TileType.ROCK, ResourceType.IRON_ORE);
+        createBlob(1, 2, 2, TileType.ROCK, ResourceType.GOLD_ORE);
+
+        // 4. Render and Fill gaps
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                const type = this.tiles[y][x];
+                let color = COLORS.GRASS;
+                
+                if (type === TileType.DIRT) color = COLORS.DIRT;
+                else if (type === TileType.ROCK) color = COLORS.ROCK_FLOOR;
+                else if (type === TileType.SHALLOW_WATER) color = COLORS.SHALLOW_WATER;
+                else if (type === TileType.DEEP_WATER) color = COLORS.DEEP_WATER;
+                else if (type === TileType.MARSH) color = COLORS.MARSH;
+                else if (type === TileType.LAVA) color = COLORS.LAVA;
+
                 graphics.fillStyle(color, 1);
                 graphics.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 
-                // Resources
-                this.spawnResource(x, y, type);
+                // Scatter Plants on Soil (Grass, Dirt, Marsh)
+                const key = `${x},${y}`;
+                const isSoil = type === TileType.GRASS || type === TileType.DIRT || type === TileType.MARSH;
+
+                if (!this.resources.has(key) && isSoil) {
+                    const rand = Math.random();
+                    if (rand < 0.05) this.spawnSpecificResource(x, y, ResourceType.TREE);
+                    else if (rand < 0.07) this.spawnSpecificResource(x, y, ResourceType.BERRY_BUSH);
+                    else if (rand < 0.25) this.spawnSpecificResource(x, y, ResourceType.GRASS); // High rate for grass
+                }
             }
         }
         
@@ -106,36 +177,71 @@ export default class MainScene extends Phaser.Scene {
         for(let y=0; y<=MAP_HEIGHT; y++) graphics.lineBetween(0, y*TILE_SIZE, MAP_WIDTH*TILE_SIZE, y*TILE_SIZE);
     }
 
-    private spawnResource(x: number, y: number, tileType: number) {
-        let res: ResourceEntity | null = null;
+    private spawnSpecificResource(x: number, y: number, type: ResourceType) {
         let icon = '';
+        let amount = 0;
+        let growth = 100;
 
-        if (tileType === 2) { // Rock floor
-             if (Math.random() < 0.3) { res = { type: ResourceType.ROCK_CHUNK, amount: 20 }; icon = RESOURCE_ICONS.ROCK_CHUNK; }
-             else if (Math.random() < 0.05) { res = { type: ResourceType.IRON_ORE, amount: 50 }; icon = RESOURCE_ICONS.IRON_ORE; }
-             else if (Math.random() < 0.01) { res = { type: ResourceType.GOLD_ORE, amount: 50 }; icon = RESOURCE_ICONS.GOLD_ORE; }
-        } else {
-            if (Math.random() < 0.15) { res = { type: ResourceType.TREE, amount: 20 }; icon = RESOURCE_ICONS.TREE; }
-            else if (Math.random() < 0.05) { res = { type: ResourceType.BERRY_BUSH, amount: 10 }; icon = RESOURCE_ICONS.BERRY_BUSH; }
+        if (type === ResourceType.TREE) { icon = RESOURCE_ICONS.TREE; amount = 20; growth = Phaser.Math.Between(20, 100); }
+        else if (type === ResourceType.BERRY_BUSH) { icon = RESOURCE_ICONS.BERRY_BUSH; amount = 10; growth = Phaser.Math.Between(20, 100); }
+        else if (type === ResourceType.GRASS) { icon = RESOURCE_ICONS.GRASS; amount = 0; growth = Phaser.Math.Between(20, 100); }
+        else if (type === ResourceType.ROCK_CHUNK) { icon = RESOURCE_ICONS.ROCK_CHUNK; amount = 20; }
+        else if (type === ResourceType.IRON_ORE) { icon = RESOURCE_ICONS.IRON_ORE; amount = 40; }
+        else if (type === ResourceType.GOLD_ORE) { icon = RESOURCE_ICONS.GOLD_ORE; amount = 40; }
+
+        const res: ResourceEntity = { type, amount, growth };
+        this.resources.set(`${x},${y}`, res);
+        
+        const text = this.add.text(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2, icon, { fontSize: '20px' })
+            .setOrigin(0.5);
+        
+        // Scale plants by growth visually
+        if (type === ResourceType.TREE || type === ResourceType.BERRY_BUSH || type === ResourceType.GRASS) {
+            text.setScale(0.5 + (growth/100) * 0.5);
+            // Randomize angle for grass/plants slightly for variety
+            if (type === ResourceType.GRASS) {
+                text.setAngle(Phaser.Math.Between(-15, 15));
+                text.setFontSize('16px'); // Grass is smaller
+            }
         }
 
-        if (res) {
-            this.resources.set(`${x},${y}`, res);
-            const text = this.add.text(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2, icon, { fontSize: '20px' })
-                .setOrigin(0.5);
-            this.objectLayer.add(text);
-            this.resourceText.set(`${x},${y}`, text);
+        this.objectLayer.add(text);
+        this.resourceText.set(`${x},${y}`, text);
+    }
+
+    private trySpawnWildPlant() {
+        const x = Phaser.Math.Between(0, MAP_WIDTH - 1);
+        const y = Phaser.Math.Between(0, MAP_HEIGHT - 1);
+        const key = `${x},${y}`;
+
+        // Check availability
+        if (this.resources.has(key) || this.structures.has(key) || this.blueprints.has(key)) return;
+
+        // Check soil
+        const type = this.tiles[y][x];
+        const isSoil = type === TileType.GRASS || type === TileType.DIRT || type === TileType.MARSH;
+        
+        if (isSoil) {
+            const rand = Math.random();
+            // Higher chance for grass, lower for bushes/trees
+            if (rand < 0.6) this.spawnSpecificResource(x, y, ResourceType.GRASS);
+            else if (rand < 0.8) this.spawnSpecificResource(x, y, ResourceType.BERRY_BUSH);
+            else this.spawnSpecificResource(x, y, ResourceType.TREE);
         }
     }
 
     private initPawns() {
         const createPawn = (id: string, name: string, x: number, y: number) => {
+            // Find a valid spot near spawn if x,y is invalid
+            let spawnX = x, spawnY = y;
+            while(!this.isLocationValid(spawnX, spawnY)) { spawnX++; }
+
             const pawn: PawnData = {
-                id, name, color: COLORS.PAWN, pos: { x, y },
+                id, name, color: COLORS.PAWN, pos: { x: spawnX, y: spawnY },
                 skills: {
-                    [SkillType.CONSTRUCTION]: { level: 5, exp: 0 },
-                    [SkillType.MINING]: { level: 5, exp: 0 },
-                    [SkillType.PLANTS]: { level: 5, exp: 0 },
+                    [SkillType.CONSTRUCTION]: { level: Phaser.Math.Between(1, 10), exp: 0 },
+                    [SkillType.MINING]: { level: Phaser.Math.Between(1, 10), exp: 0 },
+                    [SkillType.PLANTS]: { level: Phaser.Math.Between(1, 10), exp: 0 },
                 },
                 needs: { [NeedType.FOOD]: 80, [NeedType.SLEEP]: 80, [NeedType.RECREATION]: 80 },
                 inventory: [],
@@ -144,7 +250,7 @@ export default class MainScene extends Phaser.Scene {
             };
             this.pawns.push(pawn);
 
-            const container = this.add.container(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
+            const container = this.add.container(spawnX * TILE_SIZE + TILE_SIZE/2, spawnY * TILE_SIZE + TILE_SIZE/2);
             const circle = this.add.circle(0, 0, TILE_SIZE / 2.5, pawn.color);
             const text = this.add.text(0, -20, name, { fontSize: '10px', color: '#fff', backgroundColor: '#000' }).setOrigin(0.5);
             container.add([circle, text]);
@@ -159,6 +265,12 @@ export default class MainScene extends Phaser.Scene {
     // --- Inputs & Interaction ---
 
     private setupInput() {
+        // Zoom
+        this.input.on('wheel', (pointer: Phaser.Input.Pointer, gameObjects: any, deltaX: number, deltaY: number, deltaZ: number) => {
+            const newZoom = this.cameras.main.zoom - deltaZ * 0.001;
+            this.cameras.main.setZoom(Phaser.Math.Clamp(newZoom, 0.5, 3));
+        });
+
         this.game.events.on(EVENTS.SET_INTERACTION_MODE, (mode: { type: 'build' | 'action', value: string }) => {
             this.interactionMode = mode;
             this.isDragging = false;
@@ -174,7 +286,6 @@ export default class MainScene extends Phaser.Scene {
 
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (pointer.rightButtonDown()) {
-                 // Cancel current action
                  this.isDragging = false;
                  return;
             }
@@ -242,26 +353,21 @@ export default class MainScene extends Phaser.Scene {
         const key = `${x},${y}`;
         const mode = this.interactionMode.value;
 
-        // Prevent Duplicate Tasks
         if (this.globalTasks.some(t => t.targetPos.x === x && t.targetPos.y === y && t.type !== TaskType.HAUL)) return;
 
         if (mode === ACTIONS.CANCEL) {
-             // Find task and remove
              const taskIndex = this.globalTasks.findIndex(t => t.targetPos.x === x && t.targetPos.y === y);
              if (taskIndex !== -1) {
                  const t = this.globalTasks[taskIndex];
-                 // Unassign pawn if needed
                  if (t.assignedPawnId) {
                      const p = this.pawns.find(p => p.id === t.assignedPawnId);
                      if (p) { p.currentTaskId = null; p.state = 'idle'; }
                  }
                  this.globalTasks.splice(taskIndex, 1);
-                 // Clear visual
                  if (this.blueprintGraphics.has(t.id)) {
                      this.blueprintGraphics.get(t.id)!.destroy();
                      this.blueprintGraphics.delete(t.id);
                  }
-                 // Clear blueprint data
                  if (this.blueprints.has(key)) this.blueprints.delete(key);
              }
              return;
@@ -286,7 +392,6 @@ export default class MainScene extends Phaser.Scene {
             id, type, targetPos: { x, y }, workAmount: work, structureId: structId
         });
         
-        // Visual Marker
         const rect = this.add.rectangle(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2, TILE_SIZE, TILE_SIZE, color, 0.3);
         this.mapLayer.add(rect);
         this.blueprintGraphics.set(id, rect);
@@ -306,6 +411,21 @@ export default class MainScene extends Phaser.Scene {
 
     // --- Logic Loop ---
 
+    private growPlants() {
+        this.resources.forEach((res, key) => {
+            if (res.type === ResourceType.TREE || res.type === ResourceType.BERRY_BUSH || res.type === ResourceType.GRASS) {
+                if (res.growth < 100) {
+                    res.growth = Math.min(100, res.growth + 1); // +1% per second
+                    // Update visual scale
+                    const text = this.resourceText.get(key);
+                    if (text) {
+                        text.setScale(0.5 + (res.growth/100) * 0.5);
+                    }
+                }
+            }
+        });
+    }
+
     private updatePawns(delta: number) {
         this.pawns.forEach(pawn => {
             // Decay Needs
@@ -314,7 +434,6 @@ export default class MainScene extends Phaser.Scene {
                 if (pawn.needs[n as NeedType] < 0) pawn.needs[n as NeedType] = 0;
             }
 
-            // AI State Machine
             if (pawn.state === 'idle') {
                 this.think(pawn);
             } else if (pawn.state === 'moving') {
@@ -328,7 +447,6 @@ export default class MainScene extends Phaser.Scene {
     private think(pawn: PawnData) {
         // 1. Emergency Needs
         if (pawn.needs[NeedType.FOOD] < 30) {
-            // Find food in containers
             const foodContainer = this.findStructureWithItem(ItemType.FOOD);
             if (foodContainer) {
                 this.assignSelfTask(pawn, TaskType.EAT, foodContainer, 50);
@@ -338,12 +456,12 @@ export default class MainScene extends Phaser.Scene {
         
         if (pawn.needs[NeedType.SLEEP] < 30) {
              const bed = this.findNearestStructure(pawn.pos, 'bed');
-             const target = bed ? { x: bed.x, y: bed.y } : pawn.pos; // Sleep on ground if no bed
-             this.assignSelfTask(pawn, TaskType.SLEEP, { x: target.x, y: target.y }, 500); // Long sleep
+             const target = bed ? { x: bed.x, y: bed.y } : pawn.pos;
+             this.assignSelfTask(pawn, TaskType.SLEEP, { x: target.x, y: target.y }, 500); 
              return;
         }
 
-        // 2. Hauling (If inventory has items)
+        // 2. Hauling
         if (pawn.inventory.length > 0) {
             const container = this.findNearestStructure(pawn.pos, 'container');
             if (container) {
@@ -355,7 +473,8 @@ export default class MainScene extends Phaser.Scene {
         // 3. Global Tasks
         const validTasks = this.globalTasks.filter(t => !t.assignedPawnId && t.type !== TaskType.EAT && t.type !== TaskType.SLEEP && t.type !== TaskType.RECREATION);
         if (validTasks.length > 0) {
-            // Find closest? For now, just first.
+            // Find closest reachable
+            // Simplified: first one
             const task = validTasks[0];
             task.assignedPawnId = pawn.id;
             pawn.currentTaskId = task.id;
@@ -365,8 +484,6 @@ export default class MainScene extends Phaser.Scene {
 
         // 4. Recreation
         if (pawn.needs[NeedType.RECREATION] < 50) {
-            // Find a tree or rock to look at
-            // Mock logic: pick random tile nearby
             this.assignSelfTask(pawn, TaskType.RECREATION, pawn.pos, 200);
             return;
         }
@@ -375,7 +492,6 @@ export default class MainScene extends Phaser.Scene {
     private assignSelfTask(pawn: PawnData, type: TaskType, pos: Position, work: number) {
         const id = `self_${pawn.id}_${Date.now()}`;
         const task: Task = { id, type, targetPos: pos, workAmount: work, assignedPawnId: pawn.id };
-        // We don't push self-tasks to global queue usually, but to simplify logic loop:
         this.globalTasks.push(task);
         pawn.currentTaskId = id;
         pawn.state = 'moving';
@@ -386,11 +502,6 @@ export default class MainScene extends Phaser.Scene {
         if (!task) { pawn.state = 'idle'; return; }
 
         task.workAmount -= 1 * (delta / 16);
-
-        // Visual feedback
-        if (Math.random() < 0.05) {
-             // Shake effect or particles could go here
-        }
 
         if (task.workAmount <= 0) {
             this.completeTask(task, pawn);
@@ -406,14 +517,13 @@ export default class MainScene extends Phaser.Scene {
                     const bp = Object.values(BLUEPRINTS).find(b => b.type === task.structureId);
                     if (bp) {
                         const icon = this.add.text(task.targetPos.x * TILE_SIZE + TILE_SIZE/2, task.targetPos.y * TILE_SIZE + TILE_SIZE/2, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
-                        this.structureSprites.set(key, this.add.container(0,0, [icon])); // Wrapper
+                        this.structureSprites.set(key, this.add.container(0,0, [icon]));
                         this.objectLayer.add(icon);
                         
                         this.structures.set(key, {
                             id: key, type: task.structureId, x: task.targetPos.x, y: task.targetPos.y, health: 100, inventory: []
                         });
                         
-                        // If it's a container, maybe start with some emergency rations?
                         if(task.structureId === 'container') {
                              this.structures.get(key)!.inventory.push({ type: ItemType.FOOD, amount: 50 });
                         }
@@ -423,16 +533,20 @@ export default class MainScene extends Phaser.Scene {
                 break;
             case TaskType.HARVEST:
             case TaskType.CHOP:
-            case TaskType.MINE:
                 const res = this.resources.get(key);
                 if (res) {
-                    let itemType = ItemType.WOOD;
-                    if (res.type === ResourceType.BERRY_BUSH) itemType = ItemType.FOOD;
-                    if (res.type === ResourceType.ROCK_CHUNK) itemType = ItemType.STONE;
-                    if (res.type === ResourceType.IRON_ORE) itemType = ItemType.IRON;
-                    if (res.type === ResourceType.GOLD_ORE) itemType = ItemType.GOLD;
-
-                    this.addToInventory(pawn.inventory, itemType, 5); // Flat amount for now
+                    if (res.growth < 80) {
+                        // Yield nothing if immature
+                        // Destroy plant anyway? Usually in Rimworld harvesting destroys, chopping destroys.
+                        // Let's allow destroy but 0 yield.
+                    } else {
+                        let itemType = (res.type === ResourceType.BERRY_BUSH) ? ItemType.FOOD : ItemType.WOOD;
+                        const skill = pawn.skills[SkillType.PLANTS].level;
+                        const skillFactor = 0.5 + ((skill - 1) / (MAX_SKILL_LEVEL - 1)) * 1.5; // Level 1 = 0.5, Level 20 = 2.0
+                        const amount = Math.floor(res.amount * (res.growth / 100) * skillFactor);
+                        
+                        if (amount > 0) this.addToInventory(pawn.inventory, itemType, amount);
+                    }
                     
                     this.resources.delete(key);
                     if (this.resourceText.has(key)) {
@@ -441,8 +555,22 @@ export default class MainScene extends Phaser.Scene {
                     }
                 }
                 break;
+            case TaskType.MINE:
+                const ore = this.resources.get(key);
+                if (ore) {
+                    let itemType = ItemType.STONE;
+                    if (ore.type === ResourceType.IRON_ORE) itemType = ItemType.IRON;
+                    if (ore.type === ResourceType.GOLD_ORE) itemType = ItemType.GOLD;
+
+                    this.addToInventory(pawn.inventory, itemType, 5);
+                    this.resources.delete(key);
+                    if (this.resourceText.has(key)) {
+                        this.resourceText.get(key)!.destroy();
+                        this.resourceText.delete(key);
+                    }
+                }
+                break;
             case TaskType.HAUL:
-                // Dump inventory to container
                 const container = this.structures.get(key);
                 if (container && container.type === 'container') {
                     pawn.inventory.forEach(item => {
@@ -453,12 +581,6 @@ export default class MainScene extends Phaser.Scene {
                 break;
             case TaskType.EAT:
                 pawn.needs[NeedType.FOOD] = 100;
-                // Remove food from container?
-                // For simplicity, infinite food in containers for now or reduce logic
-                const foodCont = this.structures.get(key);
-                if(foodCont) {
-                    // Logic to reduce food count
-                }
                 break;
             case TaskType.SLEEP:
                 pawn.needs[NeedType.SLEEP] = 100;
@@ -468,7 +590,6 @@ export default class MainScene extends Phaser.Scene {
                 break;
         }
 
-        // Cleanup
         if (this.blueprintGraphics.has(task.id)) {
             this.blueprintGraphics.get(task.id)!.destroy();
             this.blueprintGraphics.delete(task.id);
@@ -498,7 +619,11 @@ export default class MainScene extends Phaser.Scene {
         if (dist < 5) {
             pawn.state = (task.type === TaskType.SLEEP) ? 'sleeping' : 'working';
         } else {
-            const speed = 0.15 * delta;
+            let speedMod = 1.0;
+            if (pawn.needs[NeedType.FOOD] < 30) speedMod -= 0.1;
+            if (pawn.needs[NeedType.SLEEP] < 30) speedMod -= 0.1;
+
+            const speed = 0.15 * delta * speedMod;
             const angle = Phaser.Math.Angle.Between(sprite.x, sprite.y, targetX, targetY);
             sprite.x += Math.cos(angle) * speed;
             sprite.y += Math.sin(angle) * speed;
@@ -509,11 +634,26 @@ export default class MainScene extends Phaser.Scene {
 
     private isLocationValid(x: number, y: number): boolean {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return false;
+        
+        // Impassable terrain
+        const tile = this.tiles[y][x];
+        if (tile === TileType.DEEP_WATER || tile === TileType.LAVA) return false;
+
         const key = `${x},${y}`;
-        // Can't build on water (not implemented yet) or existing structures
-        if (this.structures.has(key) || this.blueprints.has(key)) return false;
-        // Can't build wall on rock?
-        if (this.tiles[y][x] === 2) return false; 
+        if (this.structures.has(key) || this.blueprints.has(key)) {
+             // If structure is passable (floor), then valid
+             if (this.structures.has(key)) {
+                 // Simplification: only floors and beds are passable
+                 const s = this.structures.get(key)!;
+                 if (s.type === 'floor' || s.type === 'bed') return true;
+                 return false;
+             }
+             if (this.blueprints.has(key)) return false; 
+        }
+        
+        // Rock logic
+        if (this.tiles[y][x] === TileType.ROCK) return true; // Can walk on rock floor
+        
         return true;
     }
 
@@ -557,7 +697,7 @@ export default class MainScene extends Phaser.Scene {
 
     private handleCamera(delta: number) {
         const cursors = this.input.keyboard!.createCursorKeys();
-        const speed = 0.5 * delta;
+        const speed = 0.5 * delta / this.cameras.main.zoom; // Adjust speed by zoom
         if (cursors.left.isDown || this.input.activePointer.x < 50) this.cameras.main.scrollX -= speed;
         if (cursors.right.isDown || this.input.activePointer.x > this.scale.width - 50) this.cameras.main.scrollX += speed;
         if (cursors.up.isDown || this.input.activePointer.y < 50) this.cameras.main.scrollY -= speed;
@@ -585,9 +725,17 @@ export default class MainScene extends Phaser.Scene {
         const res = this.resources.get(key);
         const struct = this.structures.get(key);
         const pawn = this.pawns.find(p => p.pos.x === x && p.pos.y === y);
-        const tileType = this.tiles[y][x] === 2 ? 'Rock Floor' : (this.tiles[y][x] === 1 ? 'Dirt' : 'Grass');
+        
+        let tileName = 'Grass';
+        const type = this.tiles[y][x];
+        if (type === TileType.DIRT) tileName = 'Dirt';
+        else if (type === TileType.ROCK) tileName = 'Rock Floor';
+        else if (type === TileType.SHALLOW_WATER) tileName = 'Shallow Water';
+        else if (type === TileType.DEEP_WATER) tileName = 'Deep Water';
+        else if (type === TileType.MARSH) tileName = 'Marsh';
+        else if (type === TileType.LAVA) tileName = 'Lava';
 
-        this.game.events.emit(EVENTS.UPDATE_HOVER, { x, y, tileType, res, struct, pawn });
+        this.game.events.emit(EVENTS.UPDATE_HOVER, { x, y, tileType: tileName, res, struct, pawn });
     }
 
     private setupEvents() {
@@ -604,7 +752,6 @@ export default class MainScene extends Phaser.Scene {
             const sprite = this.pawnSprites.get(pawnId);
             if (sprite) {
                 this.cameras.main.startFollow(sprite, true, 0.1, 0.1);
-                this.cameras.main.setZoom(2); // Zoom in
             } else {
                  this.cameras.main.stopFollow();
             }
@@ -612,7 +759,6 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private emitUIUpdate() {
-        // Aggregate storage
         const storage: Record<string, number> = {};
         this.structures.forEach(s => {
             s.inventory.forEach(item => {
