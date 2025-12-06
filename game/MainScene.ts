@@ -593,13 +593,37 @@ export default class MainScene extends Phaser.Scene {
     private setupEvents() {
         this.events.on('shutdown', () => {
             this.game.events.off(EVENTS.SET_INTERACTION_MODE);
+            this.game.events.off(EVENTS.FOCUS_PAWN);
+        });
+
+        this.game.events.on(EVENTS.FOCUS_PAWN, (pawnId: string | null) => {
+            if (!pawnId) {
+                this.cameras.main.stopFollow();
+                return;
+            }
+            const sprite = this.pawnSprites.get(pawnId);
+            if (sprite) {
+                this.cameras.main.startFollow(sprite, true, 0.1, 0.1);
+                this.cameras.main.setZoom(2); // Zoom in
+            } else {
+                 this.cameras.main.stopFollow();
+            }
         });
     }
 
     private emitUIUpdate() {
+        // Aggregate storage
+        const storage: Record<string, number> = {};
+        this.structures.forEach(s => {
+            s.inventory.forEach(item => {
+                storage[item.type] = (storage[item.type] || 0) + item.amount;
+            });
+        });
+
         this.game.events.emit(EVENTS.UPDATE_UI, {
             pawns: this.pawns,
-            tasksCount: this.globalTasks.length
+            tasksCount: this.globalTasks.length,
+            storage
         });
     }
 }

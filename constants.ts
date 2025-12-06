@@ -22,6 +22,14 @@ export const RESOURCE_ICONS = {
     GOLD_ORE: '🧈',
 };
 
+export const ITEM_ICONS = {
+    [ItemType.WOOD]: '🪵',
+    [ItemType.FOOD]: '🍱',
+    [ItemType.STONE]: '🪨',
+    [ItemType.IRON]: '🔩',
+    [ItemType.GOLD]: '💰'
+};
+
 export const NEEDS_DECAY_RATE = {
     Food: 0.05,
     Sleep: 0.02,

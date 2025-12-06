@@ -105,4 +105,5 @@ export const EVENTS = {
     UPDATE_UI: 'update-ui',
     SET_INTERACTION_MODE: 'set-interaction-mode', // Build or Action
     UPDATE_HOVER: 'update-hover',
+    FOCUS_PAWN: 'focus-pawn',
 };
