@@ -2,18 +2,8 @@
 
 import Phaser from 'phaser';
 import { TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, COLORS, BLUEPRINTS, RESOURCE_ICONS, ACTIONS, NEEDS_DECAY_RATE, MAX_SKILL_LEVEL } from '../constants';
-import { PawnData, SkillType, NeedType, Task, TaskType, Position, EVENTS, ResourceType, ResourceEntity, StructureEntity, ItemType, Item } from '../types';
-import { findPath } from './utils/pathfinding';
-
-enum TileType {
-    GRASS = 0,
-    DIRT = 1,
-    ROCK = 2,
-    SHALLOW_WATER = 3,
-    DEEP_WATER = 4,
-    MARSH = 5,
-    LAVA = 6
-}
+import { PawnData, SkillType, NeedType, Task, TaskType, Position, EVENTS, ResourceType, ResourceEntity, StructureEntity, ItemType, Item, TileType } from '../types';
+import { createInitialMap } from './utils/mapGeneration';
 
 export default class MainScene extends Phaser.Scene {
     add!: Phaser.GameObjects.GameObjectFactory;
@@ -29,7 +19,7 @@ export default class MainScene extends Phaser.Scene {
     private overlayLayer!: Phaser.GameObjects.Container;
     
     // Game State
-    private tiles: number[][] = []; 
+    private tiles: TileType[][] = []; 
     private resources: Map<string, ResourceEntity> = new Map();
     private structures: Map<string, StructureEntity> = new Map();
     private blueprints: Map<string, Task> = new Map();
@@ -60,7 +50,7 @@ export default class MainScene extends Phaser.Scene {
         this.objectLayer = this.add.container(0, 0);
         this.overlayLayer = this.add.container(0, 0);
 
-        this.generateMap();
+        this.initMap();
         this.initPawns();
         this.setupInput();
         this.setupEvents();
@@ -79,70 +69,17 @@ export default class MainScene extends Phaser.Scene {
         this.updatePawns(delta);
     }
 
-    // --- Generation ---
+    // --- Generation & Rendering ---
 
-    private generateMap() {
+    private initMap() {
+        // Generate Data
+        const mapData = createInitialMap();
+        this.tiles = mapData.tiles;
+
+        // Render Tiles
         const graphics = this.add.graphics();
         this.mapLayer.add(graphics);
 
-        // 1. Initialize all as Grass
-        for (let y = 0; y < MAP_HEIGHT; y++) {
-            this.tiles[y] = [];
-            for (let x = 0; x < MAP_WIDTH; x++) {
-                this.tiles[y][x] = TileType.GRASS;
-            }
-        }
-
-        // 2. Blobs Generation Helpers
-        const createBlob = (count: number, minSize: number, maxSize: number, type: TileType, resourceType?: ResourceType) => {
-            for (let i = 0; i < count; i++) {
-                const cx = Phaser.Math.Between(5, MAP_WIDTH - 5);
-                const cy = Phaser.Math.Between(5, MAP_HEIGHT - 5);
-                const w = Phaser.Math.Between(minSize, maxSize);
-                const h = Phaser.Math.Between(minSize, maxSize);
-
-                for (let y = cy - h; y <= cy + h; y++) {
-                    for (let x = cx - w; x <= cx + w; x++) {
-                        if (x >= 0 && x < MAP_WIDTH && y >= 0 && y < MAP_HEIGHT) {
-                            // Circular-ish check
-                            if (Phaser.Math.Distance.Between(cx, cy, x, y) < (w + h) / 2) {
-                                this.tiles[y][x] = type;
-                                if (resourceType) {
-                                    // Remove existing resource on this tile
-                                    const key = `${x},${y}`;
-                                    if(this.resources.has(key)) {
-                                         this.resources.delete(key);
-                                         if(this.resourceText.has(key)) {
-                                             this.resourceText.get(key)!.destroy();
-                                             this.resourceText.delete(key);
-                                         }
-                                    }
-                                    // High chance to spawn the resource for this biome
-                                    if (Math.random() < 0.7) this.spawnSpecificResource(x, y, resourceType);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-
-        // 3. Generate Features
-        // Deep Water Cores
-        createBlob(8, 2, 5, TileType.DEEP_WATER);
-        // Shallow Water / Puddles (Surrounding deep or standalone)
-        createBlob(15, 2, 4, TileType.SHALLOW_WATER);
-        // Marsh
-        createBlob(10, 2, 4, TileType.MARSH);
-        // Lava
-        createBlob(2, 2, 3, TileType.LAVA);
-        
-        // Rock / Mountains with Ores
-        createBlob(6, 3, 6, TileType.ROCK, ResourceType.ROCK_CHUNK);
-        createBlob(3, 2, 3, TileType.ROCK, ResourceType.IRON_ORE);
-        createBlob(1, 2, 2, TileType.ROCK, ResourceType.GOLD_ORE);
-
-        // 4. Render and Fill gaps
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
                 const type = this.tiles[y][x];
@@ -157,17 +94,6 @@ export default class MainScene extends Phaser.Scene {
 
                 graphics.fillStyle(color, 1);
                 graphics.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                
-                // Scatter Plants on Soil (Grass, Dirt, Marsh)
-                const key = `${x},${y}`;
-                const isSoil = type === TileType.GRASS || type === TileType.DIRT || type === TileType.MARSH;
-
-                if (!this.resources.has(key) && isSoil) {
-                    const rand = Math.random();
-                    if (rand < 0.05) this.spawnSpecificResource(x, y, ResourceType.TREE);
-                    else if (rand < 0.07) this.spawnSpecificResource(x, y, ResourceType.BERRY_BUSH);
-                    else if (rand < 0.25) this.spawnSpecificResource(x, y, ResourceType.GRASS); // High rate for grass
-                }
             }
         }
         
@@ -175,12 +101,18 @@ export default class MainScene extends Phaser.Scene {
         graphics.lineStyle(1, 0x000000, 0.05);
         for(let x=0; x<=MAP_WIDTH; x++) graphics.lineBetween(x*TILE_SIZE, 0, x*TILE_SIZE, MAP_HEIGHT*TILE_SIZE);
         for(let y=0; y<=MAP_HEIGHT; y++) graphics.lineBetween(0, y*TILE_SIZE, MAP_WIDTH*TILE_SIZE, y*TILE_SIZE);
+
+        // Spawn Initial Resources
+        mapData.resources.forEach((type, key) => {
+            const [xStr, yStr] = key.split(',');
+            this.spawnSpecificResource(parseInt(xStr), parseInt(yStr), type);
+        });
     }
 
     private spawnSpecificResource(x: number, y: number, type: ResourceType) {
         let icon = '';
         let amount = 0;
-        let growth = 100;
+        let growth = 100; // Default fully grown for rocks etc.
 
         if (type === ResourceType.TREE) { icon = RESOURCE_ICONS.TREE; amount = 20; growth = Phaser.Math.Between(20, 100); }
         else if (type === ResourceType.BERRY_BUSH) { icon = RESOURCE_ICONS.BERRY_BUSH; amount = 10; growth = Phaser.Math.Between(20, 100); }
@@ -201,7 +133,7 @@ export default class MainScene extends Phaser.Scene {
             // Randomize angle for grass/plants slightly for variety
             if (type === ResourceType.GRASS) {
                 text.setAngle(Phaser.Math.Between(-15, 15));
-                text.setFontSize('16px'); // Grass is smaller
+                text.setFontSize('16px'); 
             }
         }
 

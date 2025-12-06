@@ -103,6 +103,16 @@ export interface StructureEntity {
     inventory: Item[]; // For containers
 }
 
+export enum TileType {
+    GRASS = 0,
+    DIRT = 1,
+    ROCK = 2,
+    SHALLOW_WATER = 3,
+    DEEP_WATER = 4,
+    MARSH = 5,
+    LAVA = 6
+}
+
 // Events for React-Phaser communication
 export const EVENTS = {
     UPDATE_UI: 'update-ui',
