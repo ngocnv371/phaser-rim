@@ -58,13 +58,27 @@ export interface Item {
 
 export interface StructureBlueprint {
     id: string;
-    type: 'wall' | 'floor' | 'container' | 'bed' | 'campfire';
+    type: string;
     name: string;
     workToBuild: number;
     color: number;
     icon: string;
     isPassable: boolean;
     cost: Item[];
+    isPlant?: boolean; // If true, creates a resource instead of structure
+}
+
+export interface PresetItem {
+    x: number;
+    y: number;
+    blueprintId: string;
+}
+
+export interface Preset {
+    id: string;
+    name: string;
+    description: string;
+    items: PresetItem[];
 }
 
 export interface PawnData {
@@ -85,7 +99,8 @@ export enum ResourceType {
     ROCK_CHUNK = 'Rock Chunk',
     IRON_ORE = 'Iron Ore',
     GOLD_ORE = 'Gold Ore',
-    GRASS = 'Grass'
+    GRASS = 'Grass',
+    POTATO_PLANT = 'Potato Plant'
 }
 
 export interface ResourceEntity {
@@ -116,7 +131,7 @@ export enum TileType {
 // Events for React-Phaser communication
 export const EVENTS = {
     UPDATE_UI: 'update-ui',
-    SET_INTERACTION_MODE: 'set-interaction-mode', // Build or Action
+    SET_INTERACTION_MODE: 'set-interaction-mode', // Build or Action or Preset
     UPDATE_HOVER: 'update-hover',
     FOCUS_PAWN: 'focus-pawn',
 };

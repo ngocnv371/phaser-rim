@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { BLUEPRINTS, ACTIONS, ITEM_ICONS } from '../constants';
+import { BLUEPRINTS, ACTIONS, ITEM_ICONS, PRESETS } from '../constants';
 import { PawnData, EVENTS, ResourceEntity, StructureEntity, ItemType, ResourceType } from '../types';
 import Phaser from 'phaser';
 
@@ -20,8 +20,8 @@ interface HoverData {
 const GameUI: React.FC<GameUIProps> = ({ game }) => {
     const [pawns, setPawns] = useState<PawnData[]>([]);
     const [hoverData, setHoverData] = useState<HoverData | null>(null);
-    const [selectedMode, setSelectedMode] = useState<{ type: 'build' | 'action', value: string }>({ type: 'action', value: ACTIONS.SELECT });
-    const [activeTab, setActiveTab] = useState<'architect' | 'orders'>('orders');
+    const [selectedMode, setSelectedMode] = useState<{ type: 'build' | 'action' | 'preset', value: string }>({ type: 'action', value: ACTIONS.SELECT });
+    const [activeTab, setActiveTab] = useState<'architect' | 'orders' | 'presets'>('orders');
     const [selectedPawnId, setSelectedPawnId] = useState<string | null>(null);
     const [storageItems, setStorageItems] = useState<Record<string, number>>({});
 
@@ -45,7 +45,7 @@ const GameUI: React.FC<GameUIProps> = ({ game }) => {
         };
     }, [game]);
 
-    const setMode = (type: 'build' | 'action', value: string) => {
+    const setMode = (type: 'build' | 'action' | 'preset', value: string) => {
         setSelectedMode({ type, value });
         game?.events.emit(EVENTS.SET_INTERACTION_MODE, { type, value });
     };
@@ -112,7 +112,7 @@ const GameUI: React.FC<GameUIProps> = ({ game }) => {
                         {hoverData.res && (
                             <div className="text-green-400">
                                 {hoverData.res.type} 
-                                {(hoverData.res.type === ResourceType.TREE || hoverData.res.type === ResourceType.BERRY_BUSH) && (
+                                {(hoverData.res.type === ResourceType.TREE || hoverData.res.type === ResourceType.BERRY_BUSH || hoverData.res.type === ResourceType.POTATO_PLANT) && (
                                     <span className={hoverData.res.growth >= 80 ? 'text-green-300 ml-1' : 'text-gray-400 ml-1'}>
                                         ({hoverData.res.growth}%)
                                     </span>
@@ -134,26 +134,32 @@ const GameUI: React.FC<GameUIProps> = ({ game }) => {
                 <div className="bg-gray-900 text-white w-64 border-l border-gray-700 pointer-events-auto flex flex-col h-full shadow-2xl">
                     <div className="flex border-b border-gray-700">
                         <button 
-                            className={`flex-1 py-3 text-center font-bold ${activeTab === 'architect' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                            className={`flex-1 py-3 text-center font-bold text-xs uppercase ${activeTab === 'architect' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
                             onClick={() => setActiveTab('architect')}
                         >
-                            Architect
+                            Build
                         </button>
                         <button 
-                            className={`flex-1 py-3 text-center font-bold ${activeTab === 'orders' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                            className={`flex-1 py-3 text-center font-bold text-xs uppercase ${activeTab === 'presets' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
+                            onClick={() => setActiveTab('presets')}
+                        >
+                            Presets
+                        </button>
+                        <button 
+                            className={`flex-1 py-3 text-center font-bold text-xs uppercase ${activeTab === 'orders' ? 'bg-gray-700' : 'hover:bg-gray-800'}`}
                             onClick={() => setActiveTab('orders')}
                         >
                             Orders
                         </button>
                     </div>
 
-                    <div className="p-2 grid grid-cols-2 gap-2 overflow-y-auto">
-                        {activeTab === 'architect' && Object.values(BLUEPRINTS).map((bp) => (
+                    <div className="p-2 grid grid-cols-2 gap-2 overflow-y-auto content-start">
+                        {activeTab === 'architect' && Object.values(BLUEPRINTS).filter(bp => !bp.isPlant).map((bp) => (
                             <button
                                 key={bp.type}
                                 onClick={() => setMode('build', bp.type)}
                                 className={`p-3 rounded flex flex-col items-center justify-center transition-colors border ${
-                                    selectedMode.value === bp.type 
+                                    selectedMode.value === bp.type && selectedMode.type === 'build'
                                     ? 'bg-blue-900 border-blue-500' 
                                     : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
                                 }`}
@@ -165,6 +171,21 @@ const GameUI: React.FC<GameUIProps> = ({ game }) => {
                                         <span key={i}>{c.amount}{ITEM_ICONS[c.type]}</span>
                                     ))}
                                 </div>
+                            </button>
+                        ))}
+
+                        {activeTab === 'presets' && PRESETS.map((preset) => (
+                            <button
+                                key={preset.id}
+                                onClick={() => setMode('preset', preset.id)}
+                                className={`p-3 rounded flex flex-col items-center justify-center transition-colors border col-span-2 ${
+                                    selectedMode.value === preset.id && selectedMode.type === 'preset'
+                                    ? 'bg-blue-900 border-blue-500' 
+                                    : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
+                                }`}
+                            >
+                                <span className="text-sm font-bold">{preset.name}</span>
+                                <span className="text-[10px] text-gray-400 mt-1 text-center">{preset.description}</span>
                             </button>
                         ))}
 

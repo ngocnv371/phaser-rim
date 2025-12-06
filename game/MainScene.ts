@@ -1,7 +1,6 @@
 
-
 import Phaser from 'phaser';
-import { TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, COLORS, BLUEPRINTS, RESOURCE_ICONS, ACTIONS, NEEDS_DECAY_RATE, MAX_SKILL_LEVEL } from '../constants';
+import { TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, COLORS, BLUEPRINTS, RESOURCE_ICONS, ACTIONS, NEEDS_DECAY_RATE, MAX_SKILL_LEVEL, PRESETS } from '../constants';
 import { PawnData, SkillType, NeedType, Task, TaskType, Position, EVENTS, ResourceType, ResourceEntity, StructureEntity, ItemType, Item, TileType } from '../types';
 import { createInitialMap } from './utils/mapGeneration';
 
@@ -35,7 +34,7 @@ export default class MainScene extends Phaser.Scene {
     private ghostBuilding!: Phaser.GameObjects.Container;
     
     // Interaction
-    private interactionMode: { type: 'build' | 'action', value: string } = { type: 'action', value: ACTIONS.SELECT };
+    private interactionMode: { type: 'build' | 'action' | 'preset', value: string } = { type: 'action', value: ACTIONS.SELECT };
     private isDragging = false;
     private dragStart: Position | null = null;
     
@@ -117,6 +116,7 @@ export default class MainScene extends Phaser.Scene {
         if (type === ResourceType.TREE) { icon = RESOURCE_ICONS.TREE; amount = 20; growth = Phaser.Math.Between(20, 100); }
         else if (type === ResourceType.BERRY_BUSH) { icon = RESOURCE_ICONS.BERRY_BUSH; amount = 10; growth = Phaser.Math.Between(20, 100); }
         else if (type === ResourceType.GRASS) { icon = RESOURCE_ICONS.GRASS; amount = 0; growth = Phaser.Math.Between(20, 100); }
+        else if (type === ResourceType.POTATO_PLANT) { icon = RESOURCE_ICONS.POTATO_PLANT; amount = 10; growth = 0; }
         else if (type === ResourceType.ROCK_CHUNK) { icon = RESOURCE_ICONS.ROCK_CHUNK; amount = 20; }
         else if (type === ResourceType.IRON_ORE) { icon = RESOURCE_ICONS.IRON_ORE; amount = 40; }
         else if (type === ResourceType.GOLD_ORE) { icon = RESOURCE_ICONS.GOLD_ORE; amount = 40; }
@@ -128,7 +128,7 @@ export default class MainScene extends Phaser.Scene {
             .setOrigin(0.5);
         
         // Scale plants by growth visually
-        if (type === ResourceType.TREE || type === ResourceType.BERRY_BUSH || type === ResourceType.GRASS) {
+        if (type === ResourceType.TREE || type === ResourceType.BERRY_BUSH || type === ResourceType.GRASS || type === ResourceType.POTATO_PLANT) {
             text.setScale(0.5 + (growth/100) * 0.5);
             // Randomize angle for grass/plants slightly for variety
             if (type === ResourceType.GRASS) {
@@ -203,15 +203,20 @@ export default class MainScene extends Phaser.Scene {
             this.cameras.main.setZoom(Phaser.Math.Clamp(newZoom, 0.5, 3));
         });
 
-        this.game.events.on(EVENTS.SET_INTERACTION_MODE, (mode: { type: 'build' | 'action', value: string }) => {
+        this.game.events.on(EVENTS.SET_INTERACTION_MODE, (mode: { type: 'build' | 'action' | 'preset', value: string }) => {
             this.interactionMode = mode;
             this.isDragging = false;
             this.ghostBuilding.setVisible(false);
+            
+            // Clean up ghost children
+            this.ghostBuilding.removeAll(true);
+
             if (mode.type === 'build') {
                 const bp = Object.values(BLUEPRINTS).find(b => b.type === mode.value);
                 if (bp) {
-                    (this.ghostBuilding.getAt(0) as Phaser.GameObjects.Rectangle).setFillStyle(bp.color, 0.5);
-                    (this.ghostBuilding.getAt(1) as Phaser.GameObjects.Text).setText(bp.icon);
+                    const rect = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, bp.color, 0.5);
+                    const icon = this.add.text(0, 0, bp.icon, { fontSize: '20px' }).setOrigin(0.5);
+                    this.ghostBuilding.add([rect, icon]);
                 }
             }
         });
@@ -227,6 +232,9 @@ export default class MainScene extends Phaser.Scene {
             } else if (this.interactionMode.type === 'build') {
                 const { x, y } = this.getTilePos(pointer);
                 this.createBlueprint(x, y, this.interactionMode.value);
+            } else if (this.interactionMode.type === 'preset') {
+                const { x, y } = this.getTilePos(pointer);
+                this.createPreset(x, y, this.interactionMode.value);
             }
         });
 
@@ -249,9 +257,6 @@ export default class MainScene extends Phaser.Scene {
 
         // Ghost building
         this.ghostBuilding = this.add.container(0, 0);
-        const ghostRect = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, 0xffffff, 0.5);
-        const ghostIcon = this.add.text(0, 0, '', { fontSize: '20px' }).setOrigin(0.5);
-        this.ghostBuilding.add([ghostRect, ghostIcon]);
         this.ghostBuilding.setVisible(false);
         this.mapLayer.add(this.ghostBuilding);
 
@@ -309,7 +314,7 @@ export default class MainScene extends Phaser.Scene {
 
         if (mode === ACTIONS.CHOP && res?.type === ResourceType.TREE) {
             this.createTask(x, y, TaskType.CHOP, 100, 0xff0000);
-        } else if (mode === ACTIONS.HARVEST && res?.type === ResourceType.BERRY_BUSH) {
+        } else if (mode === ACTIONS.HARVEST && (res?.type === ResourceType.BERRY_BUSH || res?.type === ResourceType.POTATO_PLANT)) {
             this.createTask(x, y, TaskType.HARVEST, 50, 0x00ff00);
         } else if (mode === ACTIONS.MINE) {
             if (res && (res.type === ResourceType.ROCK_CHUNK || res.type === ResourceType.IRON_ORE || res.type === ResourceType.GOLD_ORE)) {
@@ -341,11 +346,30 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
+    private createPreset(x: number, y: number, presetId: string) {
+        const preset = PRESETS.find(p => p.id === presetId);
+        if (!preset) return;
+
+        // Simple validation: check if all spots are mostly valid
+        // Allow overlap for now, but usually we'd check strict validity
+        
+        preset.items.forEach(item => {
+            const absX = x + item.x;
+            const absY = y + item.y;
+            // Check boundaries
+            if (absX >= 0 && absX < MAP_WIDTH && absY >= 0 && absY < MAP_HEIGHT) {
+                if (this.isLocationValid(absX, absY)) {
+                     this.createBlueprint(absX, absY, item.blueprintId);
+                }
+            }
+        });
+    }
+
     // --- Logic Loop ---
 
     private growPlants() {
         this.resources.forEach((res, key) => {
-            if (res.type === ResourceType.TREE || res.type === ResourceType.BERRY_BUSH || res.type === ResourceType.GRASS) {
+            if (res.type === ResourceType.TREE || res.type === ResourceType.BERRY_BUSH || res.type === ResourceType.GRASS || res.type === ResourceType.POTATO_PLANT) {
                 if (res.growth < 100) {
                     res.growth = Math.min(100, res.growth + 1); // +1% per second
                     // Update visual scale
@@ -448,16 +472,24 @@ export default class MainScene extends Phaser.Scene {
                 if (task.structureId) {
                     const bp = Object.values(BLUEPRINTS).find(b => b.type === task.structureId);
                     if (bp) {
-                        const icon = this.add.text(task.targetPos.x * TILE_SIZE + TILE_SIZE/2, task.targetPos.y * TILE_SIZE + TILE_SIZE/2, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
-                        this.structureSprites.set(key, this.add.container(0,0, [icon]));
-                        this.objectLayer.add(icon);
-                        
-                        this.structures.set(key, {
-                            id: key, type: task.structureId, x: task.targetPos.x, y: task.targetPos.y, health: 100, inventory: []
-                        });
-                        
-                        if(task.structureId === 'container') {
-                             this.structures.get(key)!.inventory.push({ type: ItemType.FOOD, amount: 50 });
+                        if (bp.isPlant) {
+                            // If it's a plant blueprint, spawn a resource instead of structure
+                            if (task.structureId === 'potato_plant') {
+                                this.spawnSpecificResource(task.targetPos.x, task.targetPos.y, ResourceType.POTATO_PLANT);
+                            }
+                        } else {
+                            // Standard Structure
+                            const icon = this.add.text(task.targetPos.x * TILE_SIZE + TILE_SIZE/2, task.targetPos.y * TILE_SIZE + TILE_SIZE/2, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
+                            this.structureSprites.set(key, this.add.container(0,0, [icon]));
+                            this.objectLayer.add(icon);
+                            
+                            this.structures.set(key, {
+                                id: key, type: task.structureId, x: task.targetPos.x, y: task.targetPos.y, health: 100, inventory: []
+                            });
+                            
+                            if(task.structureId === 'container') {
+                                this.structures.get(key)!.inventory.push({ type: ItemType.FOOD, amount: 50 });
+                            }
                         }
                     }
                     this.blueprints.delete(key);
@@ -469,12 +501,10 @@ export default class MainScene extends Phaser.Scene {
                 if (res) {
                     if (res.growth < 80) {
                         // Yield nothing if immature
-                        // Destroy plant anyway? Usually in Rimworld harvesting destroys, chopping destroys.
-                        // Let's allow destroy but 0 yield.
                     } else {
-                        let itemType = (res.type === ResourceType.BERRY_BUSH) ? ItemType.FOOD : ItemType.WOOD;
+                        let itemType = (res.type === ResourceType.BERRY_BUSH || res.type === ResourceType.POTATO_PLANT) ? ItemType.FOOD : ItemType.WOOD;
                         const skill = pawn.skills[SkillType.PLANTS].level;
-                        const skillFactor = 0.5 + ((skill - 1) / (MAX_SKILL_LEVEL - 1)) * 1.5; // Level 1 = 0.5, Level 20 = 2.0
+                        const skillFactor = 0.5 + ((skill - 1) / (MAX_SKILL_LEVEL - 1)) * 1.5; 
                         const amount = Math.floor(res.amount * (res.growth / 100) * skillFactor);
                         
                         if (amount > 0) this.addToInventory(pawn.inventory, itemType, amount);
@@ -572,15 +602,16 @@ export default class MainScene extends Phaser.Scene {
         if (tile === TileType.DEEP_WATER || tile === TileType.LAVA) return false;
 
         const key = `${x},${y}`;
-        if (this.structures.has(key) || this.blueprints.has(key)) {
+        // Prevent building on top of existing things unless it's just a floor
+        if (this.structures.has(key) || this.blueprints.has(key) || this.resources.has(key)) {
              // If structure is passable (floor), then valid
              if (this.structures.has(key)) {
-                 // Simplification: only floors and beds are passable
                  const s = this.structures.get(key)!;
-                 if (s.type === 'floor' || s.type === 'bed') return true;
+                 // Allow building on floors
+                 if (s.type === 'floor') return true;
                  return false;
              }
-             if (this.blueprints.has(key)) return false; 
+             return false; 
         }
         
         // Rock logic
@@ -637,13 +668,42 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private updateGhost() {
-        if (this.interactionMode.type !== 'build') return;
         const { x, y } = this.getTilePos(this.input.activePointer);
-        this.ghostBuilding.setVisible(true);
-        this.ghostBuilding.setPosition(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
         
-        const valid = this.isLocationValid(x, y);
-        (this.ghostBuilding.getAt(0) as Phaser.GameObjects.Rectangle).setFillStyle(valid ? 0x00ff00 : 0xff0000, 0.5);
+        if (this.interactionMode.type === 'build') {
+             this.ghostBuilding.setVisible(true);
+             this.ghostBuilding.setPosition(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
+             
+             const valid = this.isLocationValid(x, y);
+             const rect = this.ghostBuilding.getAt(0) as Phaser.GameObjects.Rectangle;
+             if (rect) rect.setFillStyle(valid ? 0x00ff00 : 0xff0000, 0.5);
+
+        } else if (this.interactionMode.type === 'preset') {
+            const preset = PRESETS.find(p => p.id === this.interactionMode.value);
+            if (!preset) return;
+
+            // Initialize ghost if not already (or if changed)
+            if (this.ghostBuilding.list.length === 0) {
+                 // Rebuild ghost for preset
+                 preset.items.forEach(item => {
+                    const bp = Object.values(BLUEPRINTS).find(b => b.type === item.blueprintId);
+                    if (bp) {
+                        const rect = this.add.rectangle(item.x * TILE_SIZE, item.y * TILE_SIZE, TILE_SIZE, TILE_SIZE, bp.color, 0.5);
+                        const icon = this.add.text(item.x * TILE_SIZE, item.y * TILE_SIZE, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
+                        this.ghostBuilding.add([rect, icon]);
+                    }
+                 });
+            }
+
+            this.ghostBuilding.setVisible(true);
+            this.ghostBuilding.setPosition(x * TILE_SIZE + TILE_SIZE/2, y * TILE_SIZE + TILE_SIZE/2);
+            // We center the ghost container on the mouse, but the items are relative 0,0.
+            // Adjust so mouse is top-left of preset? Or center?
+            // Currently 0,0 of container is at mouse. items are at x,y relative to 0,0.
+            // That works fine.
+        } else {
+             this.ghostBuilding.setVisible(false);
+        }
     }
 
     private checkMouseHover() {
