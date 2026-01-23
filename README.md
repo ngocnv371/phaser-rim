@@ -21,7 +21,7 @@ A deep, colony-management simulation game built with **Phaser 3** and **React**.
 
 Below is a visual overview of the current gameplay and user interface:
 
-![Colony Sim Gameplay](docs/photo.png)
+![Colony Sim Gameplay](docs/basic1.png)
 
 ---
 
