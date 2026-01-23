@@ -1,20 +1,32 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# RimReact Colony Sim
 
-# Run and deploy your AI Studio app
+A deep, colony-management simulation game built with **Phaser 3** and **React**. Inspired by titles like RimWorld, this project features complex pawn AI, building mechanics, and a procedurally influenced world.
 
-This contains everything you need to run your app locally.
+## 🚀 Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/1hzeAwsbK5jasHPIZSw-UdTzE3NaXALUR
+- **Pawn AI**: Autonomous pawns with needs (Food, Sleep, Recreation) and professional skill sets.
+- **Smart Building**: Blueprint-based construction system with automatic clearing of obstructions (trees, rocks).
+- **Resource Management**: Mine ores, chop timber, and harvest crops to sustain your colony.
+- **Dynamic Map**: 64x64 tile-based environment with varied terrain (Lava, Marsh, Water, Rock).
+- **Prefab System**: Quickly deploy pre-designed structures like "Small Cottage" or "Potato Farm".
 
-## Run Locally
+## 🛠️ Tech Stack
 
-**Prerequisites:**  Node.js
+- **Engine**: Phaser 3.90+
+- **UI Framework**: React 19 (Hooks, Context-free event bridge)
+- **Styling**: Tailwind CSS
+- **Pathfinding**: Custom BFS-based navigation for grid-based movement.
 
+## ## Docs
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Below is a visual overview of the current gameplay and user interface:
+
+![Colony Sim Gameplay](docs/photo.png)
+
+---
+
+### Technical Implementation Notes
+
+- **Event Bridge**: The game uses a custom event emitter to bridge the high-performance Phaser rendering loop with the reactive React UI, ensuring smooth data flow for pawn statuses and inventory.
+- **Visuals**: Structures utilize a hybrid rendering approach, combining solid primitive rectangles for "connected" world-building with emoji-based iconography for clear visual metaphors.
+- **Auto-Clearing**: When placing blueprints over resources, the engine automatically calculates the necessary prerequisite tasks (Chop/Mine) and queues them for pawns.
