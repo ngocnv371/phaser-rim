@@ -1,4 +1,3 @@
-
 import Phaser from 'phaser';
 import { TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, COLORS, BLUEPRINTS, RESOURCE_ICONS, ACTIONS, NEEDS_DECAY_RATE, MAX_SKILL_LEVEL, PRESETS } from '../constants';
 import { PawnData, SkillType, NeedType, Task, TaskType, Position, EVENTS, ResourceType, ResourceEntity, StructureEntity, ItemType, Item, TileType } from '../types';
@@ -514,12 +513,13 @@ export default class MainScene extends Phaser.Scene {
                             let container: Phaser.GameObjects.Container;
 
                             if (isBlock) {
-                                // For walls and floors, use a solid rectangle to look connected
+                                // For walls and floors, use a solid rectangle to look connected, plus the icon
                                 const rect = this.add.rectangle(0, 0, TILE_SIZE, TILE_SIZE, bp.color);
+                                const icon = this.add.text(0, 0, bp.icon, {fontSize: '20px'}).setOrigin(0.5);
                                 container = this.add.container(
                                     task.targetPos.x * TILE_SIZE + TILE_SIZE/2, 
                                     task.targetPos.y * TILE_SIZE + TILE_SIZE/2, 
-                                    [rect]
+                                    [rect, icon]
                                 );
                             } else {
                                 // For furniture, keep the icon
